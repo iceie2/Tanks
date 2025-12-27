@@ -29,6 +29,27 @@ MOVE_SPEED = 3
 FUEL_PER_TURN = 100
 FUEL_COST_PER_PIXEL = 1
 
+UI_BG = pygame.Color(25, 25, 25)
+UI_BORDER = pygame.Color(200, 200, 200)
+UI_TEXT = pygame.Color(240, 240, 240)
+UI_HILITE = pygame.Color(70, 70, 70)
+
+scheduled_bullets = []  # list of (fire_time_ms, Bullet)
+THREE_SHOT_DELAY_MS = 120
+
+WEAPONS = ["Basic Shell", "Three Shot"]  # add more later
+selected_weapon = 0
+weapons_open = False
+
+font_ui = pygame.font.Font(None, 22)
+
+PANEL_W, PANEL_H = 220, 180
+panel_rect = pygame.Rect(SCREEN_WIDTH - PANEL_W - 10, 10, PANEL_W, PANEL_H)
+
+button_rect = pygame.Rect(0, 0, 110, 26)
+button_rect.topright = (SCREEN_WIDTH - 10, 10)  # top-right
+
+
 class Terrain:
     def __init__(self):
         self.surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -206,13 +227,28 @@ class Tank:
         barrel_end_y = self.y - self.barrel_length * math.sin(math.radians(self.angle))
         pygame.draw.line(surface, self.color, (self.x, self.y), (barrel_end_x, barrel_end_y), 5)
     
-    def shoot(self):
+    def shoot(self, weapon_name):
         barrel_end_x = self.x + self.barrel_length * math.cos(math.radians(self.angle))
         barrel_end_y = self.y - self.barrel_length * math.sin(math.radians(self.angle))
-        vel_x = 5 * math.cos(math.radians(self.angle))
-        vel_y = -5 * math.sin(math.radians(self.angle))
-        return Bullet(barrel_end_x, barrel_end_y, vel_x, vel_y)
 
+        speed = 5
+
+        def make_bullet(angle_deg):
+            vx = speed * math.cos(math.radians(angle_deg))
+            vy = -speed * math.sin(math.radians(angle_deg))
+            return Bullet(barrel_end_x, barrel_end_y, vx, vy)
+        
+        now = pygame.time.get_ticks()
+        
+        if weapon_name == "Three Shot":
+            spread = 1
+            angels = [self.angle - spread, self.angle, self.angle + spread]
+
+            for i, ang in enumerate(angels):
+                fire_time = now + i * THREE_SHOT_DELAY_MS
+                scheduled_bullets.append((fire_time, make_bullet(ang))) 
+            return []
+        return [make_bullet(self.angle)]
 class Bullet:
     def __init__(self, x, y, vel_x, vel_y):
         self.x = x
@@ -254,15 +290,37 @@ running = True
 while running:
     clock.tick(FPS)
     keys = pygame.key.get_pressed()
+
+    now = pygame.time.get_ticks()  # [web:306]
+    for fire_time, b in scheduled_bullets[:]:
+        if now >= fire_time:
+            bullets.append(b)
+            scheduled_bullets.remove((fire_time, b))
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE and turn == "player":
-                bullets.append(player.shoot())
+                bullets.extend(player.shoot(WEAPONS[selected_weapon]))
                 turn = "enemy"
                 turn_timer = 0
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+
+            if button_rect.collidepoint((mx, my)):
+                weapons_open = not weapons_open
+
+            elif weapons_open and panel_rect.collidepoint((mx, my)):
+                list_top = panel_rect.y + 40
+                item_h = 26
+                for i, name in enumerate(WEAPONS):
+                    item_rect = pygame.Rect(panel_rect.x + 10, list_top + i * item_h, panel_rect.w - 20, item_h)
+                    if item_rect.collidepoint((mx, my)):
+                        selected_weapon = i
+                        weapons_open = False
+                        break
+
     
     # Update
     player_keys = keys if turn == "player" else None
@@ -275,7 +333,7 @@ while running:
         turn_timer += 1
         if turn_timer > TURN_TIME:
             enemy.angle = random.randint(0, 180)
-            bullets.append(enemy.shoot())
+            bullets.extend(enemy.shoot("Basic Shell"))
             turn = "player"
             turn_timer = 0
     
@@ -303,5 +361,30 @@ while running:
     screen.blit(health_text, (10, 40))
     screen.blit(fuel_text, (10, 70))
     screen.blit(controls_text, (10, SCREEN_HEIGHT - 30))
+
+        # Weapons button
+    pygame.draw.rect(screen, UI_BG, button_rect, border_radius=6)
+    pygame.draw.rect(screen, UI_BORDER, button_rect, 2, border_radius=6)
+    screen.blit(font_ui.render("Weapons", True, UI_TEXT), (button_rect.x + 10, button_rect.y + 5))
+
+    # Weapons panel (dropdown)
+    if weapons_open:
+        pygame.draw.rect(screen, UI_BG, panel_rect, border_radius=8)
+        pygame.draw.rect(screen, UI_BORDER, panel_rect, 2, border_radius=8)
+
+        screen.blit(font_ui.render("Select weapon:", True, UI_TEXT), (panel_rect.x + 10, panel_rect.y + 12))
+
+        list_top = panel_rect.y + 40
+        item_h = 26
+        mx, my = pygame.mouse.get_pos()
+
+        for i, name in enumerate(WEAPONS):
+            item_rect = pygame.Rect(panel_rect.x + 10, list_top + i * item_h, panel_rect.w - 20, item_h)
+            hovered = item_rect.collidepoint((mx, my))
+            if hovered or i == selected_weapon:
+                pygame.draw.rect(screen, UI_HILITE, item_rect, border_radius=6)
+
+            screen.blit(font_ui.render(name, True, UI_TEXT), (item_rect.x + 8, item_rect.y + 5))
+
     
     pygame.display.flip()
